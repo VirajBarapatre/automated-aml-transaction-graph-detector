@@ -5,7 +5,7 @@ import pandas as pd
 # Page Config
 st.set_page_config(page_title="AML Compliance Dashboard", layout="wide")
 
-st.title("🚩 AML Investigation Dashboard")
+st.title("AML Investigation Dashboard")
 st.write("Displaying high-risk accounts flagged by the Isolation Forest model.")
 
 # Connect to Database
@@ -23,6 +23,20 @@ col1.metric("Total Users", total_users)
 col2.metric("Flagged Alerts", total_alerts, delta="Suspicious", delta_color="inverse")
 col3.metric("At-Risk Volume", f"${total_vol:,.2f}")
 
+# 1.5. Transaction Trend Chart
+st.subheader("Global Transaction Activity")
+# Pull volume grouped by day
+trend_query = """
+SELECT date(timestamp) as date, SUM(amount) as daily_vol 
+FROM transactions 
+GROUP BY date(timestamp)
+"""
+df_trend = pd.read_sql(trend_query, conn)
+df_trend = df_trend.set_index('date')
+
+# Display a line chart
+st.line_chart(df_trend)
+
 # 2. Alert Table
 st.subheader("Active Alerts")
 df_alerts = pd.read_sql("SELECT user_id, country_code, txn_count, total_volume, risk_score FROM alerts ORDER BY total_volume DESC", conn)
@@ -39,16 +53,26 @@ st.dataframe(df_alerts.style.highlight_max(axis=0, subset=['total_volume']), use
 st.dataframe(df_alerts.style.highlight_max(axis=0, subset=['total_volume']), use_container_width=True)
 
 # 3. Investigation Tool
-st.sidebar.header("🔍 Investigate User")
+st.sidebar.header("Investigate User")
 user_search = st.sidebar.number_input("Enter User ID", min_value=1, max_value=500)
 
 if st.sidebar.button("Fetch Transaction History"):
+    # 1. Fetch the raw log
     history = pd.read_sql(f"SELECT * FROM transactions WHERE sender_id = {user_search}", conn)
     
     if not history.empty:
         st.success(f"Showing results for User_{user_search}")
-        st.write(f"### Transaction Log for User_{user_search}")
-        # hide_index=True makes it look cleaner, and use_container_width fills the screen
+        
+        # 2. Add the Individual User Chart
+        st.write(f"### Activity Trend for User_{user_search}")
+        # Group their transactions by date for the chart
+        user_trend = history.copy()
+        user_trend['date'] = pd.to_datetime(user_trend['timestamp']).dt.date
+        user_daily = user_trend.groupby('date')['amount'].sum()
+        st.line_chart(user_daily)
+
+        # 3. Display the raw log below the chart
+        st.write(f"### Detailed Transaction Log")
         st.dataframe(history, use_container_width=True, hide_index=True)
     else:
         st.warning(f"No transactions found for User_{user_search}")
